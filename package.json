@@ -4,7 +4,7 @@
   "description": "BL@CKN1TE-NXS — WhatsApp Automation Tool with Web Panel",
   "main": "server.js",
   "engines": {
-    "node": "20.x"
+    "node": ">=20.0.0 <=26.x"
   },
   "scripts": {
     "start": "node server.js",
