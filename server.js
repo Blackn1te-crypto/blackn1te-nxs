@@ -5,15 +5,28 @@ const socketIo = require('socket.io');
 const fs = require('fs-extra');
 const path = require('path');
 const axios = require('axios');
+const os = require('os');
 
 // ============================================================
-// NODE ENGINE CHECK (Prevents Node 24 crashes)
+// ♾️ AUTO-HOSTING ENGINE DETECTION (Render 20.x vs Katabump 26.x)
 // ============================================================
 const nodeVersion = process.version;
 const majorVersion = parseInt(nodeVersion.replace('v', '').split('.')[0]);
-if (majorVersion > 20) {
-    console.warn(`⚠️ WARNING: You are running Node.js ${nodeVersion}. This bot is designed for Node 20.x or below.`);
-    console.warn(`⚠️ Please set your Render environment to use Node 20 in package.json.`);
+let isKatabump = false;
+let isRender = false;
+
+if (process.env.KATABUMP || process.env.KATABUMP_SERVER || majorVersion >= 26) {
+    isKatabump = true;
+    console.log(`✅ [HOST] Katabump Environment Detected (Node ${nodeVersion} - 26.x Core)`);
+} else if (process.env.RENDER || process.env.RENDER_EXTERNAL_URL) {
+    isRender = true;
+    console.log(`✅ [HOST] Render Environment Detected (Node ${nodeVersion} - 20.x Core)`);
+} else {
+    console.log(`⚠️ [HOST] Local/Unknown Environment (Node ${nodeVersion}). Ensure package.json supports both 20.x and 26.x.`);
+}
+
+if (majorVersion > 20 && !isKatabump) {
+    console.warn(`⚠️ WARNING: You are running Node.js ${nodeVersion} on a platform that expects 20.x. Set package.json to 20.x for Render.`);
 }
 
 const {
@@ -189,7 +202,8 @@ app.get('/health', (req, res) => {
         active: Object.values(sessions).filter(s => s.isConnected).length,
         uptime: process.uptime(),
         timestamp: Date.now(),
-        mode: INFINITE_MODE ? 'INFINITE' : 'STANDARD'
+        mode: INFINITE_MODE ? 'INFINITE' : 'STANDARD',
+        host: isKatabump ? 'Katabump (Node 26)' : (isRender ? 'Render (Node 20)' : 'Local')
     });
 });
 
@@ -439,7 +453,7 @@ function buildBeautifulMenu(session, botData, customName) {
 ┃  ▸ ${toBold('.calc')} <expression>
 ┃  ▸ ${toBold('.joke')}
 ┃  ▸ ${toBold('.meme')}
-┃  ▸ ${toBold('.emojimix')} <e1+e2>
+┃  ▸ ${toBold('.freehosting')} — free host sites
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
     );
 
@@ -510,6 +524,29 @@ function buildBeautifulMenu(session, botData, customName) {
 const LIGHTNING_EMOJIS = ['⚡', '🌩️', '⚡️', '✨', '🌟', '🔥', '💫', '🪄', '⚡'];
 const RANDOM_REACTIONS = ['⚡', '🔥', '✨', '🌟', '💫', '🎯', '🚀', '💥', '⚡️', '👑', '💎', '🎉', '✅', '🤖', '😎', '🙌', '👏', '💯', '🌟', '🪄', '🧿', '🍀', '🌈', '❤️', '👍', '🎊', '⭐'];
 function getRandomReaction() { return RANDOM_REACTIONS[Math.floor(Math.random() * RANDOM_REACTIONS.length)]; }
+
+// ============================================================
+// 🚀 HARD-CORE DOWNLOAD FALLBACK ENGINE
+// ============================================================
+async function fetchDownload(query, type = 'audio') {
+    const apis = [
+        `https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(query)}&apikey=free`,
+        `https://api.nexoracle.com/downloaders/ytdl2?q=${encodeURIComponent(query)}&apikey=free`,
+        `https://api.nexoracle.com/downloaders/ytmp3?q=${encodeURIComponent(query)}&apikey=free`,
+        `https://api.nexoracle.com/downloaders/ytmp4?q=${encodeURIComponent(query)}&apikey=free`
+    ];
+    for (const url of apis) {
+        try {
+            const res = await axios.get(url, { timeout: 15000 }).catch(() => null);
+            if (res && res.data && res.data.result) {
+                if (type === 'audio' && res.data.result.audio) return res.data.result.audio;
+                if (type === 'video' && res.data.result.video) return res.data.result.video;
+                if (res.data.result.url) return res.data.result.url;
+            }
+        } catch (e) { continue; }
+    }
+    return null;
+}
 
 // ============================================================
 // ♾️ INFINITE BOT SESSION
@@ -753,6 +790,11 @@ class BotSession {
                             if (this.readReceipts !== false) handleAutoread(this.sock, msg, this).catch(() => {});
                             else { try { this.sock.sendPresenceUpdate('available'); } catch (e) {} }
                             storeMessage(msg).catch(() => {});
+                            
+                            // AUTO TYPING ON EVERY RECEIVED MESSAGE
+                            if (this.autoTyping) {
+                                try { this.sock.sendPresenceUpdate('composing', from); } catch (e) {}
+                            }
                         }
 
                         if (msg.message?.protocolMessage?.type === 0) { handleMessageRevocation(this.sock, msg).catch(() => {}); return; }
@@ -881,7 +923,8 @@ class BotSession {
                                             const start = Date.now();
                                             const sent = await this.sock.sendMessage(from, { text: '⚡ *Pinging...*' });
                                             const latency = Date.now() - start;
-                                            await this.sock.sendMessage(from, { text: `🚀 *LIVE PING RECORD*\n\n⚡ Latency: *${latency} ms*\n🌐 Server: *Render Node*\n♾️ Status: *Infinite Active*`, edit: sent.key });
+                                            const hostStr = isKatabump ? 'Katabump (Node 26)' : (isRender ? 'Render (Node 20)' : 'Local');
+                                            await this.sock.sendMessage(from, { text: `🚀 *LIVE PING RECORD*\n\n⚡ Latency: *${latency} ms*\n🌐 Server: *${hostStr}*\n📦 Node: *${process.version}*\n♾️ Uptime: *${formatUptime(Math.floor(process.uptime()))}*\n♾️ Status: *Infinite Active*`, edit: sent.key });
                                             break;
                                         }
 
@@ -960,9 +1003,9 @@ class BotSession {
                                             await this.sock.sendMessage(from, { react: { text: '🎵', key: msg.key } });
                                             const wait = await this.sock.sendMessage(from, { text: `🔍 *Searching & Downloading:* ${q}...` });
                                             try {
-                                                const audioRes = await axios.get(`https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(q)}&apikey=free`).catch(()=>null);
-                                                if (audioRes && audioRes.data && audioRes.data.result && audioRes.data.result.audio) {
-                                                    await this.sock.sendMessage(from, { audio: { url: audioRes.data.result.audio }, mimetype: 'audio/mp4', fileName: `${q}.mp3` }, { quoted: msg });
+                                                const audioUrl = await fetchDownload(q, 'audio');
+                                                if (audioUrl) {
+                                                    await this.sock.sendMessage(from, { audio: { url: audioUrl }, mimetype: 'audio/mp4', fileName: `${q}.mp3` }, { quoted: msg });
                                                     await this.sock.sendMessage(from, { delete: wait.key });
                                                 } else { await this.safeReply(from, msg, { text: '❌ API Limit reached or song not found.' }); }
                                             } catch (e) { await this.safeReply(from, msg, { text: '❌ Download failed.' }); }
@@ -975,9 +1018,9 @@ class BotSession {
                                             await this.sock.sendMessage(from, { react: { text: '🎬', key: msg.key } });
                                             await this.safeReply(from, msg, { text: `🔍 *Fetching Video:* ${q}...` });
                                             try {
-                                                const vidRes = await axios.get(`https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(q)}&apikey=free`).catch(()=>null);
-                                                if (vidRes && vidRes.data && vidRes.data.result && vidRes.data.result.video) {
-                                                    await this.sock.sendMessage(from, { video: { url: vidRes.data.result.video }, mimetype: 'video/mp4', caption: `🎬 *${q}*\n\n_Downloaded by BL@CKN1TE-NXS_` }, { quoted: msg });
+                                                const videoUrl = await fetchDownload(q, 'video');
+                                                if (videoUrl) {
+                                                    await this.sock.sendMessage(from, { video: { url: videoUrl }, mimetype: 'video/mp4', caption: `🎬 *${q}*\n\n_Downloaded by BL@CKN1TE-NXS_` }, { quoted: msg });
                                                 } else { await this.safeReply(from, msg, { text: '❌ API Limit reached or video not found.' }); }
                                             } catch (e) { await this.safeReply(from, msg, { text: '❌ Video download failed.' }); }
                                             break;
@@ -994,6 +1037,12 @@ class BotSession {
                                                 else if (mime.includes('audio')) await this.sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mp4' });
                                                 else await this.sock.sendMessage(from, { document: buffer, mimetype: mime, fileName: 'download' });
                                             } catch (e) { await this.safeReply(from, msg, { text: '❌ Download failed. Link might be dead or protected.' }); }
+                                            break;
+                                        }
+
+                                        case 'freehosting': {
+                                            const text = `🌐 *FREE HOSTING SITES* 🌐\n\n1️⃣ *Render.com*\n   • Bot hosting or static sites (Node 20.x)\n   • Link: https://render.com\n\n2️⃣ *InfinityFree.com*\n   • PHP, Database accounts, Free domains\n   • Link: https://infinityfree.com\n\n3️⃣ *Katabump.com*\n   • Python, Node.js bot hosting (Node 26.x)\n   • Link: https://katabump.com\n\n4️⃣ *GitHub.com*\n   • Web deployment, code hosting\n   • Link: https://github.com\n\n5️⃣ *Railway.com*\n   • Full-stack app hosting\n   • Link: https://railway.app\n\n6️⃣ *Fly.io*\n   • Micro-VMs, Node hosting\n   • Link: https://fly.io\n\n7️⃣ *Deta Space*\n   • Cloud apps\n   • Link: https://deta.space`;
+                                            await this.safeReply(from, msg, { text });
                                             break;
                                         }
 
