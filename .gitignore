@@ -1,0 +1,74 @@
+# ============================================================
+# BL@CKN1TE-NXS V16 - GITIGNORE
+# ============================================================
+
+# --- Environment Variables (CRITICAL: Keeps API keys secret) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- Node.js Dependencies ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- WhatsApp Sessions (CRITICAL: Keeps your bot logged in securely) ---
+auth_info/
+auth_info_baileys/
+sessions/
+session/
+
+# --- Bot Databases & Local Storage ---
+data/
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!settings.json.example
+
+# --- Media & Temp Files (Downloads, Images, Audio) ---
+temp/
+tmp/
+downloads/
+uploads/
+*.mp3
+*.mp4
+*.wav
+*.ogg
+*.webp
+*.jpeg
+*.jpg
+*.png
+!logo.png
+!owner_image.jpg
+
+# --- Logs ---
+logs/
+*.log
+pino.log*
+
+# --- OS & Editor Files ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Build & Cache ---
+dist/
+build/
+.cache/
+.parcel-cache/
+
+# --- PM2 ---
+.pm2/
+ecosystem.config.js
+
+# --- Render / Katabump specific ---
+.render/
+.katabump/
