@@ -566,12 +566,16 @@ class BotSession {
         });
     }
 
+    async reactRandom(msg) {
+        try { await this.sock.sendMessage(msg.key.remoteJid, { react: { text: getRandomReaction(), key: msg.key } }); } catch (e) {}
+    }
+
     async getAIResponse(userJid, userMessage) {
         if (!openai) return null;
         try {
             if (!aiMemory[userJid]) aiMemory[userJid] = [];
             aiMemory[userJid].push({ role: "user", content: userMessage });
-            if (aiMemory[userJid].length > 10) aiMemory[userJid].shift();
+            if (aiMemory[userJid].length > 10) aiMemory[userJid].shift(); // Keep memory fresh
 
             const completion = await openai.chat.completions.create({
                 model: process.env.AI_MODEL || "gpt-3.5-turbo",
@@ -993,7 +997,7 @@ class BotSession {
                                             break;
                                         }
 
-                                        // EXTERNAL COMMANDS
+                                        // EXTERNAL COMMANDS FALLBACK
                                         case 'read': await commands.read(this.sock, from, msg, isAdmin, this, args); break;
                                         case 'ghost': {
                                             const mode = (args[0] || '').toLowerCase();
