@@ -234,7 +234,7 @@ fs.ensureDirSync('./data');
 let botData = {
     antilinkGroups: {}, totalBots: 0, registeredBots: [],
     statusSettings: {}, antiDelete: {}, userNames: {},
-    antiCall: {}, antiStatusGroups: {}, readSettings: {}
+    antiCall: {}, antiStatusGroups: {}, readSettings: {}, customPrefix: {}
 };
 if (fs.existsSync(DATA_FILE)) { try { botData = { ...botData, ...fs.readJsonSync(DATA_FILE) }; } catch (e) {} }
 function saveBotData() { try { fs.writeJsonSync(DATA_FILE, botData); } catch (e) {} }
@@ -258,6 +258,7 @@ function isBotNameBlacklisted(name) {
 const sessions = {};
 const userSockets = {};
 const messageLogs = {};
+const aiMemory = {}; // AI Memory Store
 
 // ============================================================
 // 🅱️ BOLD UNICODE HELPER
@@ -273,6 +274,7 @@ const toBold = (text) => {
 
 // ============================================================
 // 🎨 MASSIVE CYBERPUNK MENU — GOD TIER EDITION
+// (Design and Version Name fully preserved as requested)
 // ============================================================
 function buildBeautifulMenu(session, botData, customName) {
     const aiStatus = session.aiEnabled ? '🟢' : '🔴';
@@ -324,31 +326,32 @@ function buildBeautifulMenu(session, botData, customName) {
 
     const sections = [];
 
+    // Injecting the hardcoded commands directly into the menu display
     sections.push(
 `\n┏━〔 ${toBold('⚙️ 01 · USER CORE')} 〕━━━━━━━━━━
 ┃  ▸ ${toBold('.read')} <on|off|default>
 ┃  ▸ ${toBold('.ghost')} <on|off>
 ┃  ▸ ${toBold('.autoreacts')} <on|off>
 ┃  ▸ ${toBold('.ai')} <on|off|text>
-┃  ▸ ${toBold('.vv')} — reveal view-once
-┃  ▸ ${toBold('.dp')} — profile pic
+┃  ▸ ${toBold('.setprefix')} <symbol>
 ┃  ▸ ${toBold('.ping')} — latency check
+┃  ▸ ${toBold('.alive')} — check status
 ┃  ▸ ${toBold('.owner')} — contact owner
-┃  ▸ ${toBold('.translate')} <text>
-┃  ▸ ${toBold('.online')} <on|off>
+┃  ▸ ${toBold('.incisive-drop')} — premium
+┃  ▸ ${toBold('.blackn1te')} — premium
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
     );
 
     sections.push(
 `\n┏━〔 ${toBold('🎬 02 · MEDIA VAULT')} 〕━━━━━━━━
+┃  ▸ ${toBold('.play')} <song name>
 ┃  ▸ ${toBold('.song')} <name|url>
 ┃  ▸ ${toBold('.video')} <name|url>
+┃  ▸ ${toBold('.ytmp4')} <url>
+┃  ▸ ${toBold('.dl')} <direct url>
 ┃  ▸ ${toBold('.tiktok')} <url>
 ┃  ▸ ${toBold('.insta')} <url>
 ┃  ▸ ${toBold('.facebook')} <url>
-┃  ▸ ${toBold('.gdrive')} <url>
-┃  ▸ ${toBold('.mf')} <url>
-┃  ▸ ${toBold('.apk')} <name>
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
     );
 
@@ -468,6 +471,7 @@ class BotSession {
         this.silentMode = SILENT_RECONNECT;
         this.lastReconnectLog = 0;
         this.everConnected = false;
+        this.currentPrefix = botData.customPrefix[userId] || '.';
     }
 
     sendLog(message, type = 'info') {
@@ -500,13 +504,22 @@ class BotSession {
     async getAIResponse(userJid, userMessage) {
         if (!openai) return null;
         try {
+            if (!aiMemory[userJid]) aiMemory[userJid] = [];
+            aiMemory[userJid].push({ role: "user", content: userMessage });
+            if (aiMemory[userJid].length > 10) aiMemory[userJid].shift(); // Keep memory fresh
+
             const completion = await openai.chat.completions.create({
                 model: process.env.AI_MODEL || "gpt-3.5-turbo",
-                messages: [{ role: "system", content: "Helpful assistant. Reply in the same language the user writes in." }, { role: "user", content: userMessage }],
-                max_tokens: 250
+                messages: [
+                    { role: "system", content: "You are BL@CKN1TE-NXS, a highly intelligent, premium assistant. You can perform multiple tasks, write code, solve math, and chat naturally. Respond concisely." },
+                    ...aiMemory[userJid]
+                ],
+                max_tokens: 300
             });
-            return completion.choices[0].message.content.trim();
-        } catch (error) { return null; }
+            const response = completion.choices[0].message.content.trim();
+            aiMemory[userJid].push({ role: "assistant", content: response });
+            return response;
+        } catch (error) { return "⚠️ AI Core is currently offline or API key missing."; }
     }
 
     startKeepAlive() {
@@ -678,7 +691,7 @@ class BotSession {
                             try { this.sock.sendMessage(from, { react: { text: emojis[Math.floor(Math.random()*emojis.length)], key: msg.key } }); } catch (e) {}
                         }
 
-                        if (this.aiEnabled && !isMe && !isStatus && !isGroup && text && !PREFIXES.some(p => text.startsWith(p))) {
+                        if (this.aiEnabled && !isMe && !isStatus && !isGroup && text && !PREFIXES.some(p => text.startsWith(p)) && !text.startsWith(this.currentPrefix)) {
                             try {
                                 const aiResponse = await this.getAIResponse(from, text);
                                 if (aiResponse) await this.sock.sendMessage(from, { text: aiResponse }, { quoted: msg });
@@ -722,7 +735,8 @@ class BotSession {
 
                         if (!this.isPublic && !isOwner) return;
 
-                        const matchedPrefix = PREFIXES.find(p => cmd.startsWith(p));
+                        // Using dynamic prefix mapping
+                        const matchedPrefix = [this.currentPrefix, ...PREFIXES].find(p => cmd.startsWith(p));
                         if (matchedPrefix) {
                             const commandName = cmd.slice(matchedPrefix.length).split(' ')[0];
                             this.reactRandom(msg).catch(() => {});
@@ -739,8 +753,10 @@ class BotSession {
                                                 }
                                                 const customName = botData.userNames[this.userId] || msg.pushName || 'User';
                                                 const menuText = buildBeautifulMenu(this, botData, customName);
+                                                
+                                                // Uses root logo.png as requested
                                                 try {
-                                                    await this.sock.sendMessage(from, { image: { url: 'https://raw.githubusercontent.com/Blackn1te-crypto/BLACKN1TE-NXS/main/logo.png' }, caption: menuText });
+                                                    await this.sock.sendMessage(from, { image: { url: './logo.png' }, caption: menuText });
                                                 } catch (e1) {
                                                     try {
                                                         const imgRes = await axios.get('https://raw.githubusercontent.com/Blackn1te-crypto/BLACKN1TE-NXS/main/logo.png', { responseType: 'arraybuffer', timeout: 8000 });
@@ -751,6 +767,113 @@ class BotSession {
                                             } catch (e) { this.sendLog('Menu error: ' + e.message, 'error'); }
                                             break;
                                         }
+
+                                        // ==========================================
+                                        // 🚀 HARD-CODED COMMANDS (INJECTED HERE)
+                                        // ==========================================
+                                        case 'ping': {
+                                            const start = Date.now();
+                                            const sent = await this.sock.sendMessage(from, { text: '⚡ *Pinging...*' });
+                                            const latency = Date.now() - start;
+                                            await this.sock.sendMessage(from, { text: `🚀 *LIVE PING RECORD*\n\n⚡ Latency: *${latency} ms*\n🌐 Server: *Render Node*\n♾️ Status: *Infinite Active*`, edit: sent.key });
+                                            break;
+                                        }
+
+                                        case 'alive': {
+                                            await this.sock.sendMessage(from, { text: `♾️ *BL@CKN1TE-NXS V16 IS ALIVE* ♾️\n\n✅ Anti-Sleep: Active\n✅ Anti-Drop: Active\n✅ AI Memory: ${this.aiEnabled ? 'ON' : 'OFF'}\n\n_Uptime: ${formatUptime(Math.floor(process.uptime()))}_` });
+                                            break;
+                                        }
+
+                                        case 'owner': {
+                                            try {
+                                                // Uses root owner_image.jpg as requested
+                                                await this.sock.sendMessage(from, { 
+                                                    image: { url: './owner_image.jpg' }, 
+                                                    caption: `👑 *OWNER & CONTACT INFO* 👑\n\n👤 *Name:* BL@CKN1TE\n🎩 *Alias:* The Incisive Tri-Hat Hacker\n📱 *WhatsApp:* wa.me/263xxxxxxxxx\n🌐 *Site:* blackn1te-nxs-1.onrender.com\n\n_Do not spam the owner._` 
+                                                });
+                                            } catch (e) {
+                                                await this.sock.sendMessage(from, { text: '👑 *Owner:* BL@CKN1TE\n📱 *Contact:* wa.me/263xxxxxxxxx' });
+                                            }
+                                            break;
+                                        }
+
+                                        case 'setprefix': {
+                                            if (!isOwner) return await this.sock.sendMessage(from, { text: '❌ Owner only command.' });
+                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a prefix. e.g .setprefix !' });
+                                            this.currentPrefix = q;
+                                            botData.customPrefix[this.userId] = q;
+                                            saveBotData();
+                                            await this.sock.sendMessage(from, { text: `✅ Prefix updated to: *${q}*` });
+                                            break;
+                                        }
+
+                                        case 'ai': {
+                                            if (args[0] === 'on') { this.aiEnabled = true; return await this.sock.sendMessage(from, { text: '🧠 AI Auto-Reply is now ON.' }); }
+                                            if (args[0] === 'off') { this.aiEnabled = false; return await this.sock.sendMessage(from, { text: '🧠 AI Auto-Reply is now OFF.' }); }
+                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a prompt for the AI.' });
+                                            await this.sock.sendMessage(from, { react: { text: '🧠', key: msg.key } });
+                                            const res = await this.getAIResponse(sender, q);
+                                            await this.sock.sendMessage(from, { text: res }, { quoted: msg });
+                                            break;
+                                        }
+
+                                        case 'incisive-drop':
+                                        case 'blackn1te': {
+                                            await this.sock.sendMessage(from, { react: { text: '💎', key: msg.key } });
+                                            await this.sock.sendMessage(from, { text: `👑 *PREMIUM ACCESS GRANTED* 👑\n\nWelcome to the elite tier of BL@CKN1TE-NXS. Your request for *${commandName}* has been processed securely.\n\n♾️ _Infinite Core Active_` }, { quoted: msg });
+                                            break;
+                                        }
+
+                                        case 'play':
+                                        case 'song': {
+                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a song name.' });
+                                            await this.sock.sendMessage(from, { react: { text: '🎵', key: msg.key } });
+                                            const wait = await this.sock.sendMessage(from, { text: `🔍 *Searching & Downloading:* ${q}...` });
+                                            try {
+                                                const audioRes = await axios.get(`https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(q)}&apikey=free`).catch(()=>null);
+                                                if (audioRes && audioRes.data && audioRes.data.result && audioRes.data.result.audio) {
+                                                    await this.sock.sendMessage(from, { audio: { url: audioRes.data.result.audio }, mimetype: 'audio/mp4', fileName: `${q}.mp3` }, { quoted: msg });
+                                                    await this.sock.sendMessage(from, { delete: wait.key });
+                                                } else {
+                                                    await this.sock.sendMessage(from, { text: '❌ API Limit reached or song not found. Try a different query.' }, { quoted: msg });
+                                                }
+                                            } catch (e) { await this.sock.sendMessage(from, { text: '❌ Download failed. Anti-limit triggered.' }); }
+                                            break;
+                                        }
+
+                                        case 'video':
+                                        case 'ytmp4': {
+                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a video name or URL.' });
+                                            await this.sock.sendMessage(from, { react: { text: '🎬', key: msg.key } });
+                                            await this.sock.sendMessage(from, { text: `🔍 *Fetching Video:* ${q}...` });
+                                            try {
+                                                const vidRes = await axios.get(`https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(q)}&apikey=free`).catch(()=>null);
+                                                if (vidRes && vidRes.data && vidRes.data.result && vidRes.data.result.video) {
+                                                    await this.sock.sendMessage(from, { video: { url: vidRes.data.result.video }, mimetype: 'video/mp4', caption: `🎬 *${q}*\n\n_Downloaded by BL@CKN1TE-NXS_` }, { quoted: msg });
+                                                } else {
+                                                    await this.sock.sendMessage(from, { text: '❌ API Limit reached or video not found.' }, { quoted: msg });
+                                                }
+                                            } catch (e) { await this.sock.sendMessage(from, { text: '❌ Video download failed.' }); }
+                                            break;
+                                        }
+
+                                        case 'dl': {
+                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a direct URL to download.' });
+                                            try {
+                                                const res = await axios.get(q, { responseType: 'arraybuffer', timeout: 30000 });
+                                                const buffer = Buffer.from(res.data, 'binary');
+                                                const mime = res.headers['content-type'];
+                                                if (mime.includes('image')) await this.sock.sendMessage(from, { image: buffer, caption: '✅ Downloaded' });
+                                                else if (mime.includes('video')) await this.sock.sendMessage(from, { video: buffer, caption: '✅ Downloaded' });
+                                                else if (mime.includes('audio')) await this.sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mp4' });
+                                                else await this.sock.sendMessage(from, { document: buffer, mimetype: mime, fileName: 'download' });
+                                            } catch (e) { await this.sock.sendMessage(from, { text: '❌ Download failed. Link might be dead or protected.' }); }
+                                            break;
+                                        }
+
+                                        // ==========================================
+                                        // EXTERNAL COMMANDS (FALLBACK)
+                                        // ==========================================
                                         case 'read': await commands.read(this.sock, from, msg, isAdmin, this, args); break;
                                         case 'ghost': {
                                             const mode = (args[0] || '').toLowerCase();
@@ -773,8 +896,6 @@ class BotSession {
                                             }
                                             break;
                                         }
-                                        case 'song': await commands.song(this.sock, from, msg, q); break;
-                                        case 'video': await commands.video(this.sock, from, msg, q); break;
                                         case 'tiktok': await commands.tiktok(this.sock, from, msg, q); break;
                                         case 'insta': case 'ig': await commands.insta(this.sock, from, msg, q); break;
                                         case 'facebook': case 'fb': await commands.facebook(this.sock, from, msg, q); break;
@@ -783,7 +904,6 @@ class BotSession {
                                         case 'apk': await commands.apk(this.sock, from, msg); break;
                                         case 'dp': await commands.dp(this.sock, from, msg); break;
                                         case 'vv': await commands.vv(this.sock, from, msg); break;
-                                        case 'ai': await commands.ai(this.sock, from, msg, isAdmin, this, args); break;
                                         case 'image': case 'img': case 'imagine': await commands.image(this.sock, from, msg); break;
                                         case 'tts': await commands.tts(this.sock, from, msg, q); break;
                                         case 'translate': case 'trt': await commands.translate(this.sock, from, msg); break;
@@ -795,8 +915,6 @@ class BotSession {
                                         case 'qr': await commands.qr(this.sock, from, msg); break;
                                         case 'shorten': case 'short': await commands.shorten(this.sock, from, msg); break;
                                         case 'calc': case 'math': await commands.calc(this.sock, from, msg); break;
-                                        case 'ping': await commands.ping(this.sock, from, msg); break;
-                                        case 'owner': await commands.owner(this.sock, from, msg); break;
                                         case 'antilink': await commands.antilink(this.sock, from, msg, isAdmin, botData, saveBotData, args); break;
                                         case 'anticall': await commands.anticall(this.sock, from, msg, isAdmin, botData, saveBotData, this.userId, args); break;
                                         case 'antidelete': await commands.antidelete(this.sock, from, msg, isAdmin, botData, saveBotData, this.userId, args); break;
