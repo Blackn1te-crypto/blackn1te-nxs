@@ -38,6 +38,7 @@ const settings = require('./settings');
 const PREFIXES = ['.', '/', '>'];
 const OWNER_SECRET = process.env.OWNER_SECRET || 'blacknite_owner_2025';
 const CMD_DIR = path.join(__dirname, 'commands');
+const AI_SECRET_KEY = process.env.AI_SECRET_KEY || 'blacknite_ai_2025'; // AI Unlock Key
 
 // ============================================================
 // ♾️ INFINITE CONNECTION FLAGS
@@ -258,7 +259,8 @@ function isBotNameBlacklisted(name) {
 const sessions = {};
 const userSockets = {};
 const messageLogs = {};
-const aiMemory = {}; // AI Memory Store
+const aiMemory = {}; 
+const autoReplyState = {}; // Anti-spam tracking
 
 // ============================================================
 // 🅱️ BOLD UNICODE HELPER
@@ -273,12 +275,74 @@ const toBold = (text) => {
 };
 
 // ============================================================
+// 🧠 INTELLIGENT OFFLINE AUTO-REPLY ENGINE
+// ============================================================
+const autoReplyDB = {
+    en: {
+        greetings: ["Heyyy 😎👋 The owner is away right now, but your message has landed!", "Hie there 😂🔥 I'm keeping the inbox warm while the owner is away.", "Hello hello 👋😊 Your message has arrived safely!", "Yooo 😎 What's good? The owner is currently unavailable.", "Hey friend ❤️ I'm here to let you know your message was received.", "Hello 👋 The owner is away for a bit. Please leave your message here.", "Ayy 😁👋 The owner isn't available at the moment, but your message is noted."],
+        howAreYou: ["I'm doing fine 😎🔥 Thanks for asking! The owner is away at the moment.", "All good on this side 😂❤️ The owner is currently unavailable.", "I'm surviving in these digital streets 🤣💻 Thanks for checking in!", "Doing well, thanks 😊 How about you? The owner will respond when available.", "No complaints here 😂🤝 Your message has been received.", "System operational 😎💻 Owner temporarily unavailable!"],
+        jokes: ["🤣🤣🤣 Hold on! The owner is away, and now you're making the inbox laugh too!", "😂😂 If this message had a comedy award, it would win!", "BROOOO 💀😭 Why is this message funnier than my entire codebase?", "🤣 My digital brain needs a moment to recover from that one!", "LMAOOOO 😭🤣 Even the notifications are looking suspicious now!", "💀😂 You came to the inbox with absolutely no mercy!", "😂 I would laugh harder, but I'm supposed to be an automated assistant!"],
+        sad: ["I'm sorry you're going through this 😔❤️. Your feelings matter.", "Sending you some kindness today 🫂❤️. You don't have to explain everything at once.", "That sounds difficult 😢. If you'd like to talk, I'm here to listen.", "I'm sorry today has been heavy. Take things one step at a time ❤️.", "You deserve patience and understanding, especially on difficult days 🫂.", "I may be an automated assistant, but I can still acknowledge that what you're feeling matters."],
+        love: ["Awww ❤️🥹 That's sweet! The owner is currently away.", "Love has entered the inbox 😭❤️ Message received!", "🥹❤️ Someone is spreading affection today!", "That's adorable 😊💕 The owner will see your message when available.", "Eish 😂❤️ These romantic vibes!", "A little love goes a long way 🫶."],
+        default: ["I've received your message 😊. The owner is currently away and will respond when possible.", "Your message has been delivered 📥. BL@CKN1TE is currently offline.", "🤖 Automated assistant active. Owner is away, but your text is safe.", "Noted ✍️. The owner is unavailable right now, please leave your message here."]
+    },
+    sn: {
+        greetings: ["Makadii henyu 😊🙏 Muridzi haapo parizvino, asi meseji yenyu yasvika.", "Mhoroi 😁 Zviripo here? Muridzi wacho haapo, asi ndakaona meseji yenyu."],
+        howAreYou: ["Ndiri bho 😂🙏 Muridzi haapo pari zvino.", "Tiripo, tinotenda 😊🙏. Muridzi haapo parizvino, asi meseji yenyu yasvika."],
+        sad: ["Ndine urombo kuti uri kunzwa saizvozvo ❤️. Kana uchida kutaura, unogona kugovera zviri kukunetsa."],
+        default: ["Meseji yenyu yasvika. Muridzi haapo parizvino, achapindura kana awana nguva."]
+    },
+    nd: {
+        greetings: ["Sawubona 😊 Umnikazi akekho okwamanje, kodwa umlayezo wakho usufikile.", "Salibonani 😁 Umnikazi akekho okwamanje."],
+        howAreYou: ["Ngiyaphila 😊🙏 Umnikazi akekho okwamanje.", "Siyaphila, siyabonga 😊. Umnikazi akekho okwamanje."],
+        sad: ["Ngiyakuzwa mngane wami ❤️. Ngiyathemba ukuthi izinto zizoba ngcono."],
+        default: ["Umlayezo wakho usufikile. Umnikazi akekho okwamanje, uzophendula uma etholakala."]
+    },
+    sw: {
+        greetings: ["Habari yako? Mwenye akaunti hayupo kwa sasa, lakini ujumbe wako umepokelewa."],
+        howAreYou: ["Nzuri, asante 😊. Mwenye akaunti hayupo kwa sasa."],
+        default: ["Ujumbe wako umepokelewa. Mwenye akaunti hayupo kwa sasa, atajibu akipatikana."]
+    },
+    fr: {
+        greetings: ["Bonjour 😊 Le propriétaire est momentanément absent, mais votre message a bien été reçu."],
+        howAreYou: ["Ça va, merci 😊. Le propriétaire est momentanément absent."],
+        default: ["Votre message a été reçu. Le propriétaire est absent pour le moment."]
+    }
+};
+
+function detectLanguage(text) {
+    const lower = text.toLowerCase();
+    if (/(makadii|mhoroi|wakadini|zvakanaka|uri bho|ndiri bho)/.test(lower)) return 'sn';
+    if (/(sawubona|unjani|siyaphila|ngiyaphila|salibonani)/.test(lower)) return 'nd';
+    if (/(habari|mzuri|asante|nzuri)/.test(lower)) return 'sw';
+    if (/(bonjour|salut|ça va|merci|tres bien)/.test(lower)) return 'fr';
+    if (/(hola|bien|gracias)/.test(lower)) return 'es';
+    if (/(ola|tudo bem|obrigado)/.test(lower)) return 'pt';
+    return 'en';
+}
+
+function getOfflineAutoReply(text) {
+    const lang = detectLanguage(text);
+    const lowerText = text.toLowerCase();
+    const db = autoReplyDB[lang] || autoReplyDB['en'];
+
+    if (/(hie|hi|hello|hey|mhoroi|makadii|sawubona|habari|bonjour|hola|ola)/i.test(lowerText)) return db.greetings || autoReplyDB['en'].greetings;
+    if (/(how are you|wyd|wakadini|unjani|habari yako|ça va|tudo bem)/i.test(lowerText)) return db.howAreYou || autoReplyDB['en'].howAreYou;
+    if (/(lol|lmao|haha|😂|🤣|joke|funn|wadii|hc|ndyp)/i.test(lowerText)) return autoReplyDB['en'].jokes; 
+    if (/(sad|cry|😢|😭|💔|lonely|ndine urombo|ngiyakhala)/i.test(lowerText)) return db.sad || autoReplyDB['en'].sad;
+    if (/(love|❤️|🥰|😘|i miss you|ndinokuda|ngiyakuthanda)/i.test(lowerText)) return autoReplyDB['en'].love;
+    return db.default || autoReplyDB['en'].default;
+}
+
+// ============================================================
 // 🎨 MASSIVE CYBERPUNK MENU — GOD TIER EDITION
-// (Design and Version Name fully preserved as requested)
+// (Design and Version Name fully preserved)
 // ============================================================
 function buildBeautifulMenu(session, botData, customName) {
     const aiStatus = session.aiEnabled ? '🟢' : '🔴';
     const ghostStatus = session.readReceipts === false ? '🟢' : '🔴';
+    const autoTypeStatus = session.autoTyping ? '🟢' : '🔴';
+    const autoReplyStatus = session.autoRespond ? '🟢' : '🔴';
     const reactStatus = session.autoReact ? '🟢' : '🔴';
     const readStatus = session.readReceipts !== false ? '🟢' : '🔴';
     const antiDelStatus = botData.antiDelete[session.userId] ? '🟢' : '🔴';
@@ -309,6 +373,8 @@ function buildBeautifulMenu(session, botData, customName) {
     const coreSystems =
 `\n┏━〔 ${toBold('⚙️ CORE SYSTEMS')} 〕━━━━━━━━━━━━━
 ┃  ${aiStatus} ${toBold('AI Engine')}       ${session.aiEnabled ? 'ACTIVE' : 'IDLE'}
+┃  ${autoTypeStatus} ${toBold('Auto-Typing')}     ${session.autoTyping ? 'ACTIVE' : 'IDLE'}
+┃  ${autoReplyStatus} ${toBold('Auto-Reply')}     ${session.autoRespond ? 'ACTIVE' : 'IDLE'}
 ┃  ${ghostStatus} ${toBold('Ghost Mode')}      ${session.readReceipts === false ? 'ACTIVE' : 'IDLE'}
 ┃  ${readStatus} ${toBold('Auto-Read')}       ${session.readReceipts !== false ? 'ACTIVE' : 'IDLE'}
 ┃  ${reactStatus} ${toBold('Auto-React')}      ${session.autoReact ? 'ACTIVE' : 'IDLE'}
@@ -326,17 +392,18 @@ function buildBeautifulMenu(session, botData, customName) {
 
     const sections = [];
 
-    // Injecting the hardcoded commands directly into the menu display
     sections.push(
 `\n┏━〔 ${toBold('⚙️ 01 · USER CORE')} 〕━━━━━━━━━━
 ┃  ▸ ${toBold('.read')} <on|off|default>
 ┃  ▸ ${toBold('.ghost')} <on|off>
 ┃  ▸ ${toBold('.autoreacts')} <on|off>
-┃  ▸ ${toBold('.ai')} <on|off|text>
+┃  ▸ ${toBold('.ai')} <key> <on|off|text>
+┃  ▸ ${toBold('.autotyping')} <on|off>
+┃  ▸ ${toBold('.autorespond')} <on|off>
 ┃  ▸ ${toBold('.setprefix')} <symbol>
 ┃  ▸ ${toBold('.ping')} — latency check
 ┃  ▸ ${toBold('.alive')} — check status
-┃  ▸ ${toBold('.owner')} — contact owner
+┃  ▸ ${toBold('.owner')} — contact & emails
 ┃  ▸ ${toBold('.incisive-drop')} — premium
 ┃  ▸ ${toBold('.blackn1te')} — premium
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
@@ -453,6 +520,8 @@ class BotSession {
         this.sock = null;
         this.isConnected = false;
         this.aiEnabled = false;
+        this.autoTyping = true; // Default ON
+        this.autoRespond = false; // Default OFF
 
         const persistedRead = botData.readSettings?.[userId]?.enabled;
         this.readReceipts = (persistedRead === undefined) ? true : persistedRead;
@@ -497,16 +566,12 @@ class BotSession {
         });
     }
 
-    async reactRandom(msg) {
-        try { await this.sock.sendMessage(msg.key.remoteJid, { react: { text: getRandomReaction(), key: msg.key } }); } catch (e) {}
-    }
-
     async getAIResponse(userJid, userMessage) {
         if (!openai) return null;
         try {
             if (!aiMemory[userJid]) aiMemory[userJid] = [];
             aiMemory[userJid].push({ role: "user", content: userMessage });
-            if (aiMemory[userJid].length > 10) aiMemory[userJid].shift(); // Keep memory fresh
+            if (aiMemory[userJid].length > 10) aiMemory[userJid].shift();
 
             const completion = await openai.chat.completions.create({
                 model: process.env.AI_MODEL || "gpt-3.5-turbo",
@@ -520,6 +585,30 @@ class BotSession {
             aiMemory[userJid].push({ role: "assistant", content: response });
             return response;
         } catch (error) { return "⚠️ AI Core is currently offline or API key missing."; }
+    }
+
+    async safeReply(from, msg, content) {
+        try {
+            if (this.autoTyping) {
+                await this.sock.sendMessage(from, { react: { text: getRandomReaction(), key: msg.key } }).catch(()=>{});
+                await this.sock.sendPresenceUpdate('composing', from);
+                await delay(Math.floor(Math.random() * 1000) + 800); 
+            }
+            await this.sock.sendMessage(from, content, { quoted: msg });
+            if (this.autoTyping) await this.sock.sendPresenceUpdate('paused', from);
+        } catch (e) { console.error("SafeReply Error:", e.message); }
+    }
+
+    checkAutoReplyLimits(jid) {
+        const now = Date.now();
+        if (!autoReplyState[jid]) autoReplyState[jid] = { count: 0, lastReply: 0, firstMsgTime: now, recentMsgs: [] };
+        const state = autoReplyState[jid];
+        if (now - state.firstMsgTime > 60 * 60 * 1000) { state.count = 0; state.firstMsgTime = now; }
+        if (now - state.lastReply < 60000) return false;
+        if (state.count >= 5) return false;
+        state.count++;
+        state.lastReply = now;
+        return true;
     }
 
     startKeepAlive() {
@@ -648,6 +737,7 @@ class BotSession {
                         const isMe = msg.key.fromMe;
                         const isGroup = from.endsWith('@g.us');
                         const isStatus = from === 'status@broadcast';
+                        const sender = msg.key.participant || from;
 
                         const messageContent = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message?.viewOnceMessageV2?.message || msg.message;
                         if (!messageContent) return;
@@ -694,14 +784,30 @@ class BotSession {
                         if (this.aiEnabled && !isMe && !isStatus && !isGroup && text && !PREFIXES.some(p => text.startsWith(p)) && !text.startsWith(this.currentPrefix)) {
                             try {
                                 const aiResponse = await this.getAIResponse(from, text);
-                                if (aiResponse) await this.sock.sendMessage(from, { text: aiResponse }, { quoted: msg });
+                                if (aiResponse) await this.safeReply(from, msg, { text: aiResponse });
                             } catch (e) {}
+                        }
+
+                        if (this.autoRespond && !isMe && !isStatus && !isGroup && text && !PREFIXES.some(p => text.startsWith(p)) && !text.startsWith(this.currentPrefix)) {
+                            if (/(suicide|kill myself|emergency|help me|abuse)/i.test(text)) {
+                                return await this.safeReply(from, msg, { text: "⚠️ *URGENT SAFETY ALERT* ⚠️\n\nThe owner is currently away, but if you are in immediate danger or distress, please contact local emergency services or a trusted person immediately. Your life is valuable. ❤️" });
+                            }
+                            if (this.checkAutoReplyLimits(from)) {
+                                const replies = getOfflineAutoReply(text);
+                                if (!autoReplyState[from].recentMsgs) autoReplyState[from].recentMsgs = [];
+                                let availableReplies = replies.filter(r => !autoReplyState[from].recentMsgs.includes(r));
+                                if (availableReplies.length === 0) availableReplies = replies;
+                                const randomReply = availableReplies[Math.floor(Math.random() * availableReplies.length)];
+                                autoReplyState[from].recentMsgs.push(randomReply);
+                                if (autoReplyState[from].recentMsgs.length > 5) autoReplyState[from].recentMsgs.shift();
+                                await this.safeReply(from, msg, { text: randomReply });
+                                return; 
+                            }
                         }
 
                         if (isStatus && !isMe) { handleStatusUpdate(this.sock, m, botData, this.userId).catch(() => {}); return; }
 
                         const botNumber = jidNormalizedUser(this.sock.user.id);
-                        const sender = msg.key.participant || from;
                         const isOwner = isMe || sender.includes(botNumber.split('@')[0]);
                         let isAdmin = isOwner;
 
@@ -735,7 +841,6 @@ class BotSession {
 
                         if (!this.isPublic && !isOwner) return;
 
-                        // Using dynamic prefix mapping
                         const matchedPrefix = [this.currentPrefix, ...PREFIXES].find(p => cmd.startsWith(p));
                         if (matchedPrefix) {
                             const commandName = cmd.slice(matchedPrefix.length).split(' ')[0];
@@ -744,7 +849,8 @@ class BotSession {
                                 try {
                                     switch (commandName) {
                                         case 'menu':
-                                        case 'start': {
+                                        case 'start':
+                                        case 'cmnds': {
                                             try {
                                                 for (let i = 0; i < 3; i++) {
                                                     const lightning = LIGHTNING_EMOJIS[Math.floor(Math.random() * LIGHTNING_EMOJIS.length)];
@@ -754,7 +860,6 @@ class BotSession {
                                                 const customName = botData.userNames[this.userId] || msg.pushName || 'User';
                                                 const menuText = buildBeautifulMenu(this, botData, customName);
                                                 
-                                                // Uses root logo.png as requested
                                                 try {
                                                     await this.sock.sendMessage(from, { image: { url: './logo.png' }, caption: menuText });
                                                 } catch (e1) {
@@ -768,9 +873,6 @@ class BotSession {
                                             break;
                                         }
 
-                                        // ==========================================
-                                        // 🚀 HARD-CODED COMMANDS (INJECTED HERE)
-                                        // ==========================================
                                         case 'ping': {
                                             const start = Date.now();
                                             const sent = await this.sock.sendMessage(from, { text: '⚡ *Pinging...*' });
@@ -780,19 +882,18 @@ class BotSession {
                                         }
 
                                         case 'alive': {
-                                            await this.sock.sendMessage(from, { text: `♾️ *BL@CKN1TE-NXS V16 IS ALIVE* ♾️\n\n✅ Anti-Sleep: Active\n✅ Anti-Drop: Active\n✅ AI Memory: ${this.aiEnabled ? 'ON' : 'OFF'}\n\n_Uptime: ${formatUptime(Math.floor(process.uptime()))}_` });
+                                            await this.safeReply(from, msg, { text: `♾️ *BL@CKN1TE-NXS V16 IS ALIVE* ♾️\n\n✅ Anti-Sleep: Active\n✅ Anti-Drop: Active\n✅ AI Memory: ${this.aiEnabled ? 'ON' : 'OFF'}\n✅ Auto-Typing: ${this.autoTyping ? 'ON' : 'OFF'}\n✅ Auto-Reply: ${this.autoRespond ? 'ON' : 'OFF'}\n\n_Uptime: ${formatUptime(Math.floor(process.uptime()))}_` });
                                             break;
                                         }
 
                                         case 'owner': {
                                             try {
-                                                // Uses root owner_image.jpg as requested
                                                 await this.sock.sendMessage(from, { 
                                                     image: { url: './owner_image.jpg' }, 
-                                                    caption: `👑 *OWNER & CONTACT INFO* 👑\n\n👤 *Name:* BL@CKN1TE\n🎩 *Alias:* The Incisive Tri-Hat Hacker\n📱 *WhatsApp:* wa.me/263xxxxxxxxx\n🌐 *Site:* blackn1te-nxs-1.onrender.com\n\n_Do not spam the owner._` 
+                                                    caption: `👑 *OWNER & CONTACT INFO* 👑\n\n👤 *Name:* BL@CKN1TE\n🎩 *Alias:* The Incisive Tri-Hat Hacker\n\n📱 *NUMBERS:*\n1️⃣ +27 75 265 8738 🇿🇦\n2️⃣ +263 78 054 0231 🇿🇼\n3️⃣ +263 71 479 9483 🇿🇼 (Backup)\n\n📧 *EMAILS:*\n📩 blackn1te.trihat@gmail.com\n📩 blackn1te.incisive.trihat@gmail.com\n📩 blackn1te@protonmail.com\n\n🌐 *Site:* blackn1te-nxs-1.onrender.com\n\n_Do not spam the owner._` 
                                                 });
                                             } catch (e) {
-                                                await this.sock.sendMessage(from, { text: '👑 *Owner:* BL@CKN1TE\n📱 *Contact:* wa.me/263xxxxxxxxx' });
+                                                await this.safeReply(from, msg, { text: '👑 *Owner:* BL@CKN1TE\n📱 *Numbers:* +27 75 265 8738 / +263 78 054 0231 / +263 71 479 9483\n📧 *Emails:* blackn1te.trihat@gmail.com, blackn1te.incisive.trihat@gmail.com, blackn1te@protonmail.com' });
                                             }
                                             break;
                                         }
@@ -803,30 +904,55 @@ class BotSession {
                                             this.currentPrefix = q;
                                             botData.customPrefix[this.userId] = q;
                                             saveBotData();
-                                            await this.sock.sendMessage(from, { text: `✅ Prefix updated to: *${q}*` });
+                                            await this.safeReply(from, msg, { text: `✅ Prefix updated to: *${q}*` });
                                             break;
                                         }
 
                                         case 'ai': {
-                                            if (args[0] === 'on') { this.aiEnabled = true; return await this.sock.sendMessage(from, { text: '🧠 AI Auto-Reply is now ON.' }); }
-                                            if (args[0] === 'off') { this.aiEnabled = false; return await this.sock.sendMessage(from, { text: '🧠 AI Auto-Reply is now OFF.' }); }
-                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a prompt for the AI.' });
-                                            await this.sock.sendMessage(from, { react: { text: '🧠', key: msg.key } });
-                                            const res = await this.getAIResponse(sender, q);
-                                            await this.sock.sendMessage(from, { text: res }, { quoted: msg });
+                                            if (!isOwner) return await this.sock.sendMessage(from, { text: '❌ Owner only command.' });
+                                            const key = args[0];
+                                            if (key !== AI_SECRET_KEY) return await this.safeReply(from, msg, { text: '🔐 *ACCESS DENIED.* Incorrect AI unlock key.' });
+                                            
+                                            const mode = (args[1] || '').toLowerCase();
+                                            if (mode === 'on') { this.aiEnabled = true; return await this.safeReply(from, msg, { text: '🧠 *AI Engine:* ON (Memory Active)' }); }
+                                            if (mode === 'off') { this.aiEnabled = false; return await this.safeReply(from, msg, { text: '🧠 *AI Engine:* OFF' }); }
+                                            
+                                            const prompt = args.slice(1).join(' ');
+                                            if (!prompt) return await this.safeReply(from, msg, { text: '⚠️ Provide a prompt. Example: .ai <key> write a code' });
+                                            
+                                            const res = await this.getAIResponse(sender, prompt);
+                                            await this.safeReply(from, msg, { text: res });
+                                            break;
+                                        }
+
+                                        case 'autorespond': {
+                                            if (!isOwner) return await this.sock.sendMessage(from, { text: '❌ Owner only command.' });
+                                            const mode = (args[0] || '').toLowerCase();
+                                            if (mode === 'on') { this.autoRespond = true; await this.safeReply(from, msg, { text: '🧠 *Intelligent Auto-Reply Engine:* ON (Multilingual Mode Active)' }); }
+                                            else if (mode === 'off') { this.autoRespond = false; await this.safeReply(from, msg, { text: '🧠 *Intelligent Auto-Reply Engine:* OFF' }); }
+                                            else { await this.safeReply(from, msg, { text: `🧠 *Auto-Reply status:* ${this.autoRespond ? 'ON' : 'OFF'}` }); }
+                                            break;
+                                        }
+
+                                        case 'autotyping': {
+                                            if (!isOwner) return await this.sock.sendMessage(from, { text: '❌ Owner only command.' });
+                                            const mode = (args[0] || '').toLowerCase();
+                                            if (mode === 'on') { this.autoTyping = true; await this.safeReply(from, msg, { text: '⌨️ *Auto-Typing Simulator:* ON' }); }
+                                            else if (mode === 'off') { this.autoTyping = false; await this.safeReply(from, msg, { text: '⌨️ *Auto-Typing Simulator:* OFF' }); }
+                                            else { await this.safeReply(from, msg, { text: `⌨️ *Auto-Typing status:* ${this.autoTyping ? 'ON' : 'OFF'}` }); }
                                             break;
                                         }
 
                                         case 'incisive-drop':
                                         case 'blackn1te': {
                                             await this.sock.sendMessage(from, { react: { text: '💎', key: msg.key } });
-                                            await this.sock.sendMessage(from, { text: `👑 *PREMIUM ACCESS GRANTED* 👑\n\nWelcome to the elite tier of BL@CKN1TE-NXS. Your request for *${commandName}* has been processed securely.\n\n♾️ _Infinite Core Active_` }, { quoted: msg });
+                                            await this.safeReply(from, msg, { text: `👑 *PREMIUM ACCESS GRANTED* 👑\n\nWelcome to the elite tier of BL@CKN1TE-NXS. Your request for *${commandName}* has been processed securely.\n\n♾️ _Infinite Core Active_` });
                                             break;
                                         }
 
                                         case 'play':
                                         case 'song': {
-                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a song name.' });
+                                            if (!q) return await this.safeReply(from, msg, { text: '⚠️ Provide a song name.' });
                                             await this.sock.sendMessage(from, { react: { text: '🎵', key: msg.key } });
                                             const wait = await this.sock.sendMessage(from, { text: `🔍 *Searching & Downloading:* ${q}...` });
                                             try {
@@ -834,31 +960,27 @@ class BotSession {
                                                 if (audioRes && audioRes.data && audioRes.data.result && audioRes.data.result.audio) {
                                                     await this.sock.sendMessage(from, { audio: { url: audioRes.data.result.audio }, mimetype: 'audio/mp4', fileName: `${q}.mp3` }, { quoted: msg });
                                                     await this.sock.sendMessage(from, { delete: wait.key });
-                                                } else {
-                                                    await this.sock.sendMessage(from, { text: '❌ API Limit reached or song not found. Try a different query.' }, { quoted: msg });
-                                                }
-                                            } catch (e) { await this.sock.sendMessage(from, { text: '❌ Download failed. Anti-limit triggered.' }); }
+                                                } else { await this.safeReply(from, msg, { text: '❌ API Limit reached or song not found.' }); }
+                                            } catch (e) { await this.safeReply(from, msg, { text: '❌ Download failed.' }); }
                                             break;
                                         }
 
                                         case 'video':
                                         case 'ytmp4': {
-                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a video name or URL.' });
+                                            if (!q) return await this.safeReply(from, msg, { text: '⚠️ Provide a video name or URL.' });
                                             await this.sock.sendMessage(from, { react: { text: '🎬', key: msg.key } });
-                                            await this.sock.sendMessage(from, { text: `🔍 *Fetching Video:* ${q}...` });
+                                            await this.safeReply(from, msg, { text: `🔍 *Fetching Video:* ${q}...` });
                                             try {
                                                 const vidRes = await axios.get(`https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(q)}&apikey=free`).catch(()=>null);
                                                 if (vidRes && vidRes.data && vidRes.data.result && vidRes.data.result.video) {
                                                     await this.sock.sendMessage(from, { video: { url: vidRes.data.result.video }, mimetype: 'video/mp4', caption: `🎬 *${q}*\n\n_Downloaded by BL@CKN1TE-NXS_` }, { quoted: msg });
-                                                } else {
-                                                    await this.sock.sendMessage(from, { text: '❌ API Limit reached or video not found.' }, { quoted: msg });
-                                                }
-                                            } catch (e) { await this.sock.sendMessage(from, { text: '❌ Video download failed.' }); }
+                                                } else { await this.safeReply(from, msg, { text: '❌ API Limit reached or video not found.' }); }
+                                            } catch (e) { await this.safeReply(from, msg, { text: '❌ Video download failed.' }); }
                                             break;
                                         }
 
                                         case 'dl': {
-                                            if (!q) return await this.sock.sendMessage(from, { text: '⚠️ Provide a direct URL to download.' });
+                                            if (!q) return await this.safeReply(from, msg, { text: '⚠️ Provide a direct URL to download.' });
                                             try {
                                                 const res = await axios.get(q, { responseType: 'arraybuffer', timeout: 30000 });
                                                 const buffer = Buffer.from(res.data, 'binary');
@@ -867,13 +989,11 @@ class BotSession {
                                                 else if (mime.includes('video')) await this.sock.sendMessage(from, { video: buffer, caption: '✅ Downloaded' });
                                                 else if (mime.includes('audio')) await this.sock.sendMessage(from, { audio: buffer, mimetype: 'audio/mp4' });
                                                 else await this.sock.sendMessage(from, { document: buffer, mimetype: mime, fileName: 'download' });
-                                            } catch (e) { await this.sock.sendMessage(from, { text: '❌ Download failed. Link might be dead or protected.' }); }
+                                            } catch (e) { await this.safeReply(from, msg, { text: '❌ Download failed. Link might be dead or protected.' }); }
                                             break;
                                         }
 
-                                        // ==========================================
-                                        // EXTERNAL COMMANDS (FALLBACK)
-                                        // ==========================================
+                                        // EXTERNAL COMMANDS
                                         case 'read': await commands.read(this.sock, from, msg, isAdmin, this, args); break;
                                         case 'ghost': {
                                             const mode = (args[0] || '').toLowerCase();
@@ -883,16 +1003,16 @@ class BotSession {
                                                 botData.readSettings[this.userId].enabled = false;
                                                 saveBotData();
                                                 try { await this.sock.sendPresenceUpdate('available'); } catch (e) {}
-                                                await this.sock.sendMessage(from, { text: '👻 *Ghost Mode:* ON' }, { quoted: msg });
+                                                await this.safeReply(from, msg, { text: '👻 *Ghost Mode:* ON' });
                                             } else if (mode === 'off') {
                                                 this.readReceipts = true;
                                                 if (!botData.readSettings[this.userId]) botData.readSettings[this.userId] = {};
                                                 botData.readSettings[this.userId].enabled = true;
                                                 saveBotData();
                                                 try { await this.sock.sendPresenceUpdate('available'); } catch (e) {}
-                                                await this.sock.sendMessage(from, { text: '👻 *Ghost Mode:* OFF' }, { quoted: msg });
+                                                await this.safeReply(from, msg, { text: '👻 *Ghost Mode:* OFF' });
                                             } else {
-                                                await this.sock.sendMessage(from, { text: `👻 *Ghost Mode:* ${this.readReceipts === false ? 'ON' : 'OFF'}` }, { quoted: msg });
+                                                await this.safeReply(from, msg, { text: `👻 *Ghost Mode:* ${this.readReceipts === false ? 'ON' : 'OFF'}` });
                                             }
                                             break;
                                         }
