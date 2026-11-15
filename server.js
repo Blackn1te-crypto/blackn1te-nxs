@@ -6,6 +6,9 @@ const fs = require('fs-extra');
 const path = require('path');
 const axios = require('axios');
 const os = require('os');
+const archiver = require('archiver');
+const unzipper = require('unzipper');
+const multer = require('multer');
 
 // ============================================================
 // ♾️ AUTO-HOSTING ENGINE DETECTION (Render 20.x vs Katabump 26.x)
@@ -51,7 +54,7 @@ const settings = require('./settings');
 const PREFIXES = ['.', '/', '>'];
 const OWNER_SECRET = process.env.OWNER_SECRET || 'blacknite_owner_2025';
 const CMD_DIR = path.join(__dirname, 'commands');
-const AI_SECRET_KEY = process.env.AI_SECRET_KEY || 'blacknite_ai_2025'; // AI Unlock Key
+const AI_SECRET_KEY = process.env.AI_SECRET_KEY || 'blacknite_ai_2025';
 
 // ============================================================
 // ♾️ INFINITE CONNECTION FLAGS
@@ -274,7 +277,7 @@ const sessions = {};
 const userSockets = {};
 const messageLogs = {};
 const aiMemory = {}; 
-const autoReplyState = {}; // Anti-spam tracking
+const autoReplyState = {}; 
 
 // ============================================================
 // 🅱️ BOLD UNICODE HELPER
@@ -349,8 +352,7 @@ function getOfflineAutoReply(text) {
 }
 
 // ============================================================
-// 🎨 MASSIVE CYBERPUNK MENU — GOD TIER EDITION
-// (Design and Version Name fully preserved)
+// 🎨 MASSIVE CYBERPUNK MENU
 // ============================================================
 function buildBeautifulMenu(session, botData, customName) {
     const aiStatus = session.aiEnabled ? '🟢' : '🔴';
@@ -505,8 +507,6 @@ function buildBeautifulMenu(session, botData, customName) {
 
     const footer =
 `\n╔═══════════════════════════════════════╗
-║  🔗 ${toBold('JOIN CHANNEL')}
-║  ▸ https://whatsapp.com/channel/0029VbDubJNHbFV50Y6oiO3f
 ║  ───────────────────────────────────
 ║  ⚡ ${toBold('Powered by BL@CKN1TE')}
 ║  🎩 ${toBold('The Incisive Tri-Hat Hacker')}
@@ -526,26 +526,60 @@ const RANDOM_REACTIONS = ['⚡', '🔥', '✨', '🌟', '💫', '🎯', '🚀', 
 function getRandomReaction() { return RANDOM_REACTIONS[Math.floor(Math.random() * RANDOM_REACTIONS.length)]; }
 
 // ============================================================
-// 🚀 HARD-CORE DOWNLOAD FALLBACK ENGINE
+// 🚀 HARD-CORE MULTI-TIER DOWNLOAD ENGINE
 // ============================================================
 async function fetchDownload(query, type = 'audio') {
-    const apis = [
-        `https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(query)}&apikey=free`,
-        `https://api.nexoracle.com/downloaders/ytdl2?q=${encodeURIComponent(query)}&apikey=free`,
-        `https://api.nexoracle.com/downloaders/ytmp3?q=${encodeURIComponent(query)}&apikey=free`,
-        `https://api.nexoracle.com/downloaders/ytmp4?q=${encodeURIComponent(query)}&apikey=free`
+    // Array of API configurations to try sequentially
+    const apiEndpoints = [
+        // 1. NexOracle (Your original)
+        { 
+            url: `https://api.nexoracle.com/downloaders/ytdl?q=${encodeURIComponent(query)}&apikey=free`, 
+            audioPath: 'result.audio', videoPath: 'result.video', urlPath: 'result.url' 
+        },
+        // 2. Zenkey (Free, no key)
+        { 
+            url: type === 'audio' ? `https://api.zenkey.my.id/download/ytmp3?url=${encodeURIComponent(query)}` : `https://api.zenkey.my.id/download/ytmp4?url=${encodeURIComponent(query)}`, 
+            audioPath: 'result.url', videoPath: 'result.url', urlPath: 'result.url'
+        },
+        // 3. Vreden API (Free, no key)
+        {
+            url: type === 'audio' ? `https://api.vreden.my.id/api/ytmp3?url=${encodeURIComponent(query)}` : `https://api.vreden.my.id/api/ytmp4?url=${encodeURIComponent(query)}`,
+            audioPath: 'result.download', videoPath: 'result.download', urlPath: 'result.download'
+        },
+        // 4. Yupra (Free, no key)
+        {
+            url: type === 'audio' ? `https://api.yupra.my.id/api/downloader/ytmp3?url=${encodeURIComponent(query)}` : `https://api.yupra.my.id/api/downloader/ytmp4?url=${encodeURIComponent(query)}`,
+            audioPath: 'data.url', videoPath: 'data.url', urlPath: 'data.url'
+        },
+        // 5. Itzpire API
+        {
+            url: type === 'audio' ? `https://itzpire.com/download/ytmp3?url=${encodeURIComponent(query)}` : `https://itzpire.com/download/ytmp4?url=${encodeURIComponent(query)}`,
+            audioPath: 'data.download', videoPath: 'data.download', urlPath: 'data.download'
+        }
     ];
-    for (const url of apis) {
+
+    // Helper to extract nested paths safely
+    const getDeep = (obj, path) => path.split('.').reduce((acc, part) => acc && acc[part], obj);
+
+    for (const api of apiEndpoints) {
         try {
-            const res = await axios.get(url, { timeout: 15000 }).catch(() => null);
-            if (res && res.data && res.data.result) {
-                if (type === 'audio' && res.data.result.audio) return res.data.result.audio;
-                if (type === 'video' && res.data.result.video) return res.data.result.video;
-                if (res.data.result.url) return res.data.result.url;
+            const res = await axios.get(api.url, { timeout: 15000 });
+            if (res.data) {
+                let downloadUrl = null;
+                if (type === 'audio') downloadUrl = getDeep(res.data, api.audioPath);
+                else if (type === 'video') downloadUrl = getDeep(res.data, api.videoPath);
+                
+                // Fallback to generic URL if specific type isn't found
+                if (!downloadUrl) downloadUrl = getDeep(res.data, api.urlPath);
+                
+                if (downloadUrl) return downloadUrl;
             }
-        } catch (e) { continue; }
+        } catch (e) {
+            // Silently continue to next API
+            continue; 
+        }
     }
-    return null;
+    return null; // All APIs failed
 }
 
 // ============================================================
@@ -557,8 +591,8 @@ class BotSession {
         this.sock = null;
         this.isConnected = false;
         this.aiEnabled = false;
-        this.autoTyping = true; // Default ON
-        this.autoRespond = false; // Default OFF
+        this.autoTyping = true; 
+        this.autoRespond = false; 
 
         const persistedRead = botData.readSettings?.[userId]?.enabled;
         this.readReceipts = (persistedRead === undefined) ? true : persistedRead;
@@ -608,24 +642,49 @@ class BotSession {
     }
 
     async getAIResponse(userJid, userMessage) {
-        if (!openai) return null;
-        try {
-            if (!aiMemory[userJid]) aiMemory[userJid] = [];
-            aiMemory[userJid].push({ role: "user", content: userMessage });
-            if (aiMemory[userJid].length > 10) aiMemory[userJid].shift(); // Keep memory fresh
+        if (!aiMemory[userJid]) aiMemory[userJid] = [];
+        aiMemory[userJid].push({ role: "user", content: userMessage });
+        if (aiMemory[userJid].length > 10) aiMemory[userJid].shift();
 
-            const completion = await openai.chat.completions.create({
-                model: process.env.AI_MODEL || "gpt-3.5-turbo",
-                messages: [
-                    { role: "system", content: "You are BL@CKN1TE-NXS, a highly intelligent, premium assistant. You can perform multiple tasks, write code, solve math, and chat naturally. Respond concisely." },
-                    ...aiMemory[userJid]
-                ],
-                max_tokens: 300
-            });
-            const response = completion.choices[0].message.content.trim();
-            aiMemory[userJid].push({ role: "assistant", content: response });
-            return response;
-        } catch (error) { return "⚠️ AI Core is currently offline or API key missing."; }
+        // 1. Try Primary AI (Groq/OpenAI)
+        if (openai) {
+            try {
+                const completion = await openai.chat.completions.create({
+                    model: process.env.AI_MODEL || "gpt-3.5-turbo",
+                    messages: [
+                        { role: "system", content: "You are BL@CKN1TE-NXS, a highly intelligent, premium assistant. You can perform multiple tasks, write code, solve math, and chat naturally. Respond concisely." },
+                        ...aiMemory[userJid]
+                    ],
+                    max_tokens: 300
+                });
+                const response = completion.choices[0].message.content.trim();
+                aiMemory[userJid].push({ role: "assistant", content: response });
+                return response;
+            } catch (e) { 
+                console.warn('[AI] Primary failed, trying Gemini...'); 
+            }
+        }
+
+        // 2. Try Gemini Fallback
+        const GEMINI_KEY = 'AQ.Ab8RN6IWM5YrnzXvc5IKTPuWciEEOXbjZDrtWQG9F1-bJFJ6Yw';
+        try {
+            const geminiRes = await axios.post(
+                'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
+                {
+                    contents: [{ parts: [{ text: `You are BL@CKN1TE-NXS. Respond concisely:\n\nUser: ${userMessage}` }] }]
+                },
+                { headers: { 'Content-Type': 'application/json', 'X-goog-api-key': GEMINI_KEY }, timeout: 15000 }
+            );
+            const gemText = geminiRes?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            if (gemText) {
+                aiMemory[userJid].push({ role: "assistant", content: gemText });
+                return gemText;
+            }
+        } catch (e) { 
+            console.warn('[AI] Gemini fallback failed.'); 
+        }
+
+        return "⚠️ AI Core is currently offline or API keys missing.";
     }
 
     async safeReply(from, msg, content) {
@@ -791,7 +850,6 @@ class BotSession {
                             else { try { this.sock.sendPresenceUpdate('available'); } catch (e) {} }
                             storeMessage(msg).catch(() => {});
                             
-                            // AUTO TYPING ON EVERY RECEIVED MESSAGE
                             if (this.autoTyping) {
                                 try { this.sock.sendPresenceUpdate('composing', from); } catch (e) {}
                             }
@@ -1007,7 +1065,7 @@ class BotSession {
                                                 if (audioUrl) {
                                                     await this.sock.sendMessage(from, { audio: { url: audioUrl }, mimetype: 'audio/mp4', fileName: `${q}.mp3` }, { quoted: msg });
                                                     await this.sock.sendMessage(from, { delete: wait.key });
-                                                } else { await this.safeReply(from, msg, { text: '❌ API Limit reached or song not found.' }); }
+                                                } else { await this.safeReply(from, msg, { text: '❌ Sorry, I couldn\'t find that song right now. Try another keyword.' }); }
                                             } catch (e) { await this.safeReply(from, msg, { text: '❌ Download failed.' }); }
                                             break;
                                         }
@@ -1016,12 +1074,13 @@ class BotSession {
                                         case 'ytmp4': {
                                             if (!q) return await this.safeReply(from, msg, { text: '⚠️ Provide a video name or URL.' });
                                             await this.sock.sendMessage(from, { react: { text: '🎬', key: msg.key } });
-                                            await this.safeReply(from, msg, { text: `🔍 *Fetching Video:* ${q}...` });
+                                            const wait = await this.sock.sendMessage(from, { text: `🔍 *Fetching Video:* ${q}...` });
                                             try {
                                                 const videoUrl = await fetchDownload(q, 'video');
                                                 if (videoUrl) {
                                                     await this.sock.sendMessage(from, { video: { url: videoUrl }, mimetype: 'video/mp4', caption: `🎬 *${q}*\n\n_Downloaded by BL@CKN1TE-NXS_` }, { quoted: msg });
-                                                } else { await this.safeReply(from, msg, { text: '❌ API Limit reached or video not found.' }); }
+                                                    await this.sock.sendMessage(from, { delete: wait.key });
+                                                } else { await this.safeReply(from, msg, { text: '❌ Sorry, I couldn\'t find that video right now. Try another keyword.' }); }
                                             } catch (e) { await this.safeReply(from, msg, { text: '❌ Video download failed.' }); }
                                             break;
                                         }
@@ -1193,6 +1252,136 @@ class BotSession {
         }
     }
 }
+
+// ============================================================
+// 📦 SESSION MANAGER — Export / Import / Status
+// ============================================================
+const sessionUpload = multer({
+    dest: path.join(os.tmpdir(), 'session-uploads'),
+    limits: { fileSize: 50 * 1024 * 1024 } // 50 MB max
+});
+
+function resolveSessionPath(name) {
+    if (!name || typeof name !== 'string') return null;
+    const safe = name.replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!safe || safe !== name) return null; 
+    return path.join(AUTH_DIR, safe);
+}
+
+app.get('/api/session/status', (req, res) => {
+    try {
+        const name = String(req.query.name || 'BLACKNITE_NXS');
+        const sessionPath = resolveSessionPath(name);
+        if (!sessionPath || !fs.existsSync(sessionPath)) {
+            return res.json({ success: true, name, exists: false, registered: false, files: 0, number: null });
+        }
+        const files = fs.readdirSync(sessionPath).filter(f => f.endsWith('.json'));
+        const credsFile = path.join(sessionPath, 'creds.json');
+        let registered = false;
+        let number = null;
+        if (fs.existsSync(credsFile)) {
+            try {
+                const creds = fs.readJsonSync(credsFile);
+                registered = !!(creds && creds.registered);
+                if (creds.me && creds.me.id) number = creds.me.id.split(':')[0].split('@')[0];
+            } catch (e) {}
+        }
+        res.json({ success: true, name, exists: true, registered, files: files.length, number });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/session/export', (req, res) => {
+    try {
+        const name = String(req.query.name || 'BLACKNITE_NXS');
+        const sessionPath = resolveSessionPath(name);
+        if (!sessionPath || !fs.existsSync(sessionPath)) {
+            return res.status(404).json({ success: false, error: 'Session folder not found' });
+        }
+        const credsFile = path.join(sessionPath, 'creds.json');
+        if (!fs.existsSync(credsFile)) {
+            return res.status(404).json({ success: false, error: 'creds.json missing — session not paired yet' });
+        }
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${name}-session.zip"`);
+
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        archive.on('error', (err) => {
+            console.error('[SESSION EXPORT] Archive error:', err.message);
+            try { res.status(500).end(); } catch (e) {}
+        });
+        archive.pipe(res);
+        archive.directory(sessionPath, false); 
+        archive.finalize();
+        console.log(`📤 [SESSION EXPORT] Zipping "${name}"...`);
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/session/import', sessionUpload.single('session'), async (req, res) => {
+    const tmpFile = req.file?.path;
+    try {
+        if (!req.file) return res.status(400).json({ success: false, error: 'No zip file uploaded' });
+        const name = String(req.body?.name || 'BLACKNITE_NXS');
+        const sessionPath = resolveSessionPath(name);
+        if (!sessionPath) return res.status(400).json({ success: false, error: 'Invalid session name' });
+
+        const tmpExtractDir = path.join(os.tmpdir(), `session-extract-${Date.now()}`);
+        fs.ensureDirSync(tmpExtractDir);
+
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(tmpFile)
+                .pipe(unzipper.Extract({ path: tmpExtractDir }))
+                .on('close', resolve)
+                .on('error', reject);
+        });
+
+        let credsFoundAt = null;
+        const rootFiles = fs.readdirSync(tmpExtractDir);
+        if (rootFiles.includes('creds.json')) {
+            credsFoundAt = tmpExtractDir;
+        } else {
+            for (const item of rootFiles) {
+                const candidate = path.join(tmpExtractDir, item);
+                if (fs.statSync(candidate).isDirectory() && fs.existsSync(path.join(candidate, 'creds.json'))) {
+                    credsFoundAt = candidate;
+                    break;
+                }
+            }
+        }
+
+        if (!credsFoundAt) {
+            fs.removeSync(tmpExtractDir);
+            return res.status(400).json({ success: false, error: 'Invalid zip: creds.json not found.' });
+        }
+
+        let credsValid = false;
+        try {
+            const creds = fs.readJsonSync(path.join(credsFoundAt, 'creds.json'));
+            credsValid = !!(creds && typeof creds === 'object' && creds.noiseKey);
+        } catch (e) {
+            fs.removeSync(tmpExtractDir);
+            return res.status(400).json({ success: false, error: 'creds.json is corrupted.' });
+        }
+        if (!credsValid) {
+            fs.removeSync(tmpExtractDir);
+            return res.status(400).json({ success: false, error: 'creds.json missing required fields' });
+        }
+
+        if (fs.existsSync(sessionPath)) fs.removeSync(sessionPath);
+        fs.ensureDirSync(AUTH_DIR);
+        fs.moveSync(credsFoundAt, sessionPath);
+        fs.removeSync(tmpExtractDir);
+
+        console.log(`📥 [SESSION IMPORT] Imported "${name}" — ${fs.readdirSync(sessionPath).length} files`);
+        res.json({ success: true, message: `Session "${name}" imported successfully. Restart the bot to activate.`, name });
+    } catch (e) {
+        console.error('[SESSION IMPORT] Error:', e);
+        try { if (tmpFile && fs.existsSync(tmpFile)) fs.removeSync(tmpFile); } catch (err) {}
+        res.status(500).json({ success: false, error: e.message });
+    } finally {
+        try { if (tmpFile && fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) {}
+    }
+});
 
 // ============================================================
 // SOCKET.IO
