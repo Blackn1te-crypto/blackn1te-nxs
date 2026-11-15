@@ -15,6 +15,7 @@
     "@distube/ytdl-core": "^4.14.4",
     "@vitalets/google-translate-api": "^9.2.1",
     "@whiskeysockets/baileys": "^7.0.0-rc10",
+    "archiver": "^7.0.1",
     "axios": "^1.6.0",
     "cheerio": "^1.2.0",
     "dotenv": "^16.6.1",
@@ -32,6 +33,7 @@
     "ruhend-scraper": "^10.0.3",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
+    "unzipper": "^0.12.3",
     "yt-search": "^2.12.1"
   },
   "devDependencies": {
